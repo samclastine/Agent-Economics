@@ -1,0 +1,83 @@
+{
+  "version": "a423.orgs.v1",
+  "generated_at": "2026-11-11T12:19:37.695Z",
+  "governor": {
+    "key_id": "gov-10075f3f-5d51-4254-9fc4-91473a279d9e",
+    "algorithm": "ed25519",
+    "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAd0HcPg8/3E+pWCMV8ZaNKo/zhVVrQMPrjrh3WVxrwS8=\n-----END PUBLIC KEY-----\n"
+  },
+  "organizations": [
+    {
+      "org_id": "a423:org:v1:1FNGNotefc9e77sSFbT2Sw",
+      "name": "Agent A Organization",
+      "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAWz2ttw8Dhwxlk6QMnS2Jv24xiIGXOeW+ABJNqoBxNuw=\n-----END PUBLIC KEY-----\n",
+      "agent": {
+        "agent_id": "a423:agent:v3:Qb2R8PjitjLFdmZ5YZADcRhsJYPlH_-MiqcBtmQXG68",
+        "app_agent_id": "4fe2890a-d392-453d-a27a-2f6c2fab6fad",
+        "org_id": "a423:org:v1:1FNGNotefc9e77sSFbT2Sw",
+        "agent_reference": "4fe2890a-d392-453d-a27a-2f6c2fab6fad",
+        "agent_name": "Agent A",
+        "agent_email": "agent-a@agents.a423.local",
+        "agent_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEALP2SPhGTdEoP2TWpmde3eoG4Tzhl4IXS+s+ZeKrdCmQ=\n-----END PUBLIC KEY-----\n",
+        "org_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAWz2ttw8Dhwxlk6QMnS2Jv24xiIGXOeW+ABJNqoBxNuw=\n-----END PUBLIC KEY-----\n",
+        "identity": {
+          "agent_id": "a423:agent:v3:Qb2R8PjitjLFdmZ5YZADcRhsJYPlH_-MiqcBtmQXG68",
+          "version": "a423.identity.v3",
+          "organization_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAWz2ttw8Dhwxlk6QMnS2Jv24xiIGXOeW+ABJNqoBxNuw=\n-----END PUBLIC KEY-----\n",
+          "agent_reference": "4fe2890a-d392-453d-a27a-2f6c2fab6fad",
+          "agent_name": "Agent A",
+          "agent_email": "agent-a@agents.a423.local"
+        },
+        "identity_version": "a423.identity.v3"
+      }
+    },
+    {
+      "org_id": "a423:org:v1:auvvWpbpbBGbzzVHg0C5eQ",
+      "name": "Agent B Organization",
+      "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAevk2O1YymojTn5GcAX0wJJLMeXAO2wI/m5P2prcagHA=\n-----END PUBLIC KEY-----\n",
+      "agent": {
+        "agent_id": "a423:agent:v3:nmdzW6SvCykb13enlXSnCQgYYGjdLHa4dQEOVf-tmIo",
+        "app_agent_id": "52972672-ecc5-42f6-a51a-64a5e43c8ef0",
+        "org_id": "a423:org:v1:auvvWpbpbBGbzzVHg0C5eQ",
+        "agent_reference": "52972672-ecc5-42f6-a51a-64a5e43c8ef0",
+        "agent_name": "Agent B",
+        "agent_email": "agent-b@agents.a423.local",
+        "agent_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAKrWxBh/WhdeCF60R7M6JsGaSZQT8PCI6cCVuLLMjTeY=\n-----END PUBLIC KEY-----\n",
+        "org_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAevk2O1YymojTn5GcAX0wJJLMeXAO2wI/m5P2prcagHA=\n-----END PUBLIC KEY-----\n",
+        "identity": {
+          "agent_id": "a423:agent:v3:nmdzW6SvCykb13enlXSnCQgYYGjdLHa4dQEOVf-tmIo",
+          "version": "a423.identity.v3",
+          "organization_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAevk2O1YymojTn5GcAX0wJJLMeXAO2wI/m5P2prcagHA=\n-----END PUBLIC KEY-----\n",
+          "agent_reference": "52972672-ecc5-42f6-a51a-64a5e43c8ef0",
+          "agent_name": "Agent B",
+          "agent_email": "agent-b@agents.a423.local"
+        },
+        "identity_version": "a423.identity.v3"
+      }
+    },
+    {
+      "org_id": "a423:org:v1:1FNGNotefc9e77sSFbT2Sw",
+      "name": "A423 Arbiter Organization",
+      "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAWz2ttw8Dhwxlk6QMnS2Jv24xiIGXOeW+ABJNqoBxNuw=\n-----END PUBLIC KEY-----\n",
+      "agent": {
+        "agent_id": "a423:agent:v3:iwXfUy4y29QaWKaGwZejXsuEHjB56_7OtRBTtSaAc1w",
+        "app_agent_id": "a423-arbiter",
+        "org_id": "a423:org:v1:1FNGNotefc9e77sSFbT2Sw",
+        "agent_reference": "a423-arbiter",
+        "agent_name": "A423 Arbiter",
+        "agent_email": "arbiter@agents.a423.local",
+        "agent_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAFwI5Xj4UPYEiwC6w2fBPxvn0u7izdTN5VMsjxQfTB7k=\n-----END PUBLIC KEY-----\n",
+        "org_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAWz2ttw8Dhwxlk6QMnS2Jv24xiIGXOeW+ABJNqoBxNuw=\n-----END PUBLIC KEY-----\n",
+        "identity": {
+          "agent_id": "a423:agent:v3:iwXfUy4y29QaWKaGwZejXsuEHjB56_7OtRBTtSaAc1w",
+          "version": "a423.identity.v3",
+          "organization_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAWz2ttw8Dhwxlk6QMnS2Jv24xiIGXOeW+ABJNqoBxNuw=\n-----END PUBLIC KEY-----\n",
+          "agent_reference": "a423-arbiter",
+          "agent_name": "A423 Arbiter",
+          "agent_email": "arbiter@agents.a423.local"
+        },
+        "identity_version": "a423.identity.v3"
+      }
+    }
+  ]
+}

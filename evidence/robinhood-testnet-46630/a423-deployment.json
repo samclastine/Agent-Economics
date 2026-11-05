@@ -1,0 +1,18 @@
+{
+  "protocol": "a423",
+  "sdk": "@allorc/a423-sdk@0.9.0",
+  "contract": "A423Escrow 0.5",
+  "chain_id": 46630,
+  "chain_name": "Robinhood Chain Testnet",
+  "rpc": "https://rpc.testnet.chain.robinhood.com/rpc",
+  "explorer": "https://explorer.testnet.chain.robinhood.com",
+  "token": "0x8187DC056F36dF72694D1CA830c518FD5D542DbC",
+  "token_symbol": "tWIF",
+  "escrow": "0xB68E49bbAbE166c363447FbC7587310104ebdc75",
+  "deployer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "deployment_tx": "0x01784a9aba9dd3a3df5d178fd7047e571785f7233d3ead4697801593d35f8a86",
+  "deployment_block": 152232010,
+  "index_from_block": 152232000,
+  "source_verified": false,
+  "note": "Robinhood Chain Testnet deployment. The token is a mock tWIF, displayed as $WIF in the UI. No mainnet WIF or source-verification claim is made."
+}

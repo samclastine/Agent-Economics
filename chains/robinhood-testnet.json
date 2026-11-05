@@ -1,0 +1,41 @@
+{
+  "$schema": "Agent Treasury chain profile",
+  "name": "Robinhood Chain Testnet",
+  "chainId": 46630,
+  "network": "testnet",
+  "rpcUrl": "https://rpc.testnet.chain.robinhood.com/rpc",
+  "explorerUrl": "https://explorer.testnet.chain.robinhood.com",
+  "nativeCurrency": { "name": "Ether", "symbol": "ETH", "decimals": 18 },
+  "env": {
+    "CHAIN_ID": "46630",
+    "RPC_URL": "https://rpc.testnet.chain.robinhood.com/rpc",
+    "EXPLORER_URL": "https://explorer.testnet.chain.robinhood.com",
+    "DEMO_MODE": "false",
+    "A423_CHAIN_ID": "46630",
+    "A423_RPC_URL": "https://rpc.testnet.chain.robinhood.com/rpc",
+    "A423_TOKEN_ADDRESS": "0x8187DC056F36dF72694D1CA830c518FD5D542DbC",
+    "A423_ESCROW_ADDRESS": "0xB68E49bbAbE166c363447FbC7587310104ebdc75"
+  },
+  "deployment": {
+    "token": "0x8187DC056F36dF72694D1CA830c518FD5D542DbC",
+    "escrow": "0xB68E49bbAbE166c363447FbC7587310104ebdc75",
+    "deployer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "deploymentTx": "0x01784a9aba9dd3a3df5d178fd7047e571785f7233d3ead4697801593d35f8a86",
+    "deploymentBlock": 152232010,
+    "indexFromBlock": 152232000,
+    "sourceVerified": false
+  },
+  "notes": [
+    "A423 0.9 uses the SDK A423Escrow 0.5 contract and the Robinhood Testnet MockWIF token.",
+    "Fund the configured demo signers with testnet ETH for gas and tWIF for escrow principal.",
+    "Run scripts/seed.ts to bind Agent A and Agent B to their signer indices.",
+    "The UI displays the testnet mock token tWIF as $WIF; it is not mainnet WIF."
+  ],
+  "viemChain": {
+    "id": 46630,
+    "name": "Robinhood Chain Testnet",
+    "nativeCurrency": { "name": "Ether", "symbol": "ETH", "decimals": 18 },
+    "rpcUrls": { "default": { "http": ["https://rpc.testnet.chain.robinhood.com/rpc"] } },
+    "blockExplorers": { "default": { "name": "Robinhood Explorer", "url": "https://explorer.testnet.chain.robinhood.com" } }
+  }
+}
