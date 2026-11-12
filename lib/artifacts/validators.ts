@@ -10,10 +10,10 @@ export type ArtifactPath = (typeof ALLOWED_ARTIFACT_PATHS)[number];
  * A423 jobs may name their own deliverable (for example
  * `research-report.md` or `/artifacts/research-report.md`) instead of using
  * one of the fixed template paths. Accept those names only when they
- * are a single safe file name (optionally under /artifacts/) with a known
- * extension; never accept traversal or arbitrary directories.
+ * are a single safe file name (optionally under /artifacts/ or /tmp/) with
+ * a known extension; never accept traversal or arbitrary directories.
  */
-const SAFE_A423_PATH = /^\/?(?:artifacts\/)?[A-Za-z0-9][A-Za-z0-9._-]*\.(?:md|txt|json|html|tsx|ts|yaml)$/;
+const SAFE_A423_PATH = /^\/?(?:(?:artifacts|tmp)\/)?[A-Za-z0-9][A-Za-z0-9._-]*\.(?:md|txt|json|html|tsx|ts|yaml)$/;
 
 export function isAllowedPath(path: string): path is ArtifactPath {
   return (ALLOWED_ARTIFACT_PATHS as readonly string[]).includes(path) || SAFE_A423_PATH.test(path);

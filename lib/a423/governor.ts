@@ -1,7 +1,7 @@
 import { createHash, createPrivateKey, createPublicKey, randomBytes, randomUUID, sign, timingSafeEqual, verify } from 'crypto';
 import { readFileSync } from 'fs';
 import type { Identity } from '@allorc/identity';
-import { getSqlite } from '@/lib/db/client';
+import { sqlAll, sqlExec, sqlGet, sqlRun, sqlTransaction } from '@/lib/db/sql';
 import { canonicalJson } from './ids';
 
 /**
@@ -128,8 +128,10 @@ export type CredentialPayload = {
   jti: string;
 };
 
-export function ensureGovernorSchema(): void {
-  getSqlite().exec(SCHEMA);
+let schemaReady: Promise<void> | null = null;
+
+export function ensureGovernorSchema(): Promise<void> {
+  return (schemaReady ??= sqlExec(SCHEMA));
 }
 
 export function governorConfigPath(): string {
@@ -162,6 +164,7 @@ export type PrivateKeyFile = {
 
 export function loadPrivateKeyFile(): PrivateKeyFile {
   try {
+    if (process.env.A423_PRIVATE_KEYS_JSON) return JSON.parse(process.env.A423_PRIVATE_KEYS_JSON) as PrivateKeyFile;
     return JSON.parse(readFileSync(/*turbopackIgnore: true*/ governorPrivatePath(), 'utf8')) as PrivateKeyFile;
   } catch {
     throw new GovernorError('GOVERNOR_KEYS_MISSING', 'Governor private keys are not configured', 503);
@@ -186,47 +189,50 @@ function rowToRecord(row: RegistryRow): AgentPublicRecord {
   };
 }
 
-export function registerAgentRecord(record: Omit<AgentPublicRecord, 'created_at' | 'verified_at' | 'status'> & { status?: 'pending' | 'verified' }): void {
-  ensureGovernorSchema();
-  const sqlite = getSqlite();
+export async function registerAgentRecord(record: Omit<AgentPublicRecord, 'created_at' | 'verified_at' | 'status'> & { status?: 'pending' | 'verified' }): Promise<void> {
+  await ensureGovernorSchema();
   const now = Date.now();
-  sqlite.prepare(
-    `INSERT INTO a423_organizations (org_id, name, public_key, created_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT(org_id) DO UPDATE SET name = excluded.name, public_key = excluded.public_key`,
-  ).run(record.org_id, record.identity.agent_name + ' org', record.org_public_key, now);
-  sqlite.prepare(
-    `INSERT INTO a423_agent_registry
-       (agent_id, app_agent_id, org_id, agent_reference, agent_name, agent_email, agent_public_key, org_public_key, identity_json, identity_version, status, created_at, verified_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(app_agent_id) DO UPDATE SET
-       agent_id = excluded.agent_id, org_id = excluded.org_id,
-       agent_reference = excluded.agent_reference, agent_name = excluded.agent_name,
-       agent_email = excluded.agent_email, agent_public_key = excluded.agent_public_key,
-       org_public_key = excluded.org_public_key, identity_json = excluded.identity_json,
-       identity_version = excluded.identity_version`,
-  ).run(
-    record.agent_id, record.app_agent_id, record.org_id, record.agent_reference,
-    record.agent_name, record.agent_email, record.agent_public_key, record.org_public_key,
-    JSON.stringify(record.identity), record.identity_version, record.status ?? 'pending', now,
-    record.status === 'verified' ? now : null,
-  );
+  await sqlTransaction(async (tx) => {
+    await tx.run(
+      `INSERT INTO a423_organizations (org_id, name, public_key, created_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(org_id) DO UPDATE SET name = excluded.name, public_key = excluded.public_key`,
+      [record.org_id, record.identity.agent_name + ' org', record.org_public_key, now],
+    );
+    await tx.run(
+      `INSERT INTO a423_agent_registry
+         (agent_id, app_agent_id, org_id, agent_reference, agent_name, agent_email, agent_public_key, org_public_key, identity_json, identity_version, status, created_at, verified_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(app_agent_id) DO UPDATE SET
+         agent_id = excluded.agent_id, org_id = excluded.org_id,
+         agent_reference = excluded.agent_reference, agent_name = excluded.agent_name,
+         agent_email = excluded.agent_email, agent_public_key = excluded.agent_public_key,
+         org_public_key = excluded.org_public_key, identity_json = excluded.identity_json,
+         identity_version = excluded.identity_version`,
+      [
+        record.agent_id, record.app_agent_id, record.org_id, record.agent_reference,
+        record.agent_name, record.agent_email, record.agent_public_key, record.org_public_key,
+        JSON.stringify(record.identity), record.identity_version, record.status ?? 'pending', now,
+        record.status === 'verified' ? now : null,
+      ],
+    );
+  });
 }
 
-export function getRegistryByAppId(appAgentId: string): AgentPublicRecord | null {
-  ensureGovernorSchema();
-  const row = getSqlite().prepare('SELECT * FROM a423_agent_registry WHERE app_agent_id = ?').get(appAgentId) as RegistryRow | undefined;
+export async function getRegistryByAppId(appAgentId: string): Promise<AgentPublicRecord | null> {
+  await ensureGovernorSchema();
+  const row = await sqlGet<RegistryRow>('SELECT * FROM a423_agent_registry WHERE app_agent_id = ?', [appAgentId]);
   return row ? rowToRecord(row) : null;
 }
 
-export function getRegistryByIdentityId(agentId: string): AgentPublicRecord | null {
-  ensureGovernorSchema();
-  const row = getSqlite().prepare('SELECT * FROM a423_agent_registry WHERE agent_id = ?').get(agentId) as RegistryRow | undefined;
+export async function getRegistryByIdentityId(agentId: string): Promise<AgentPublicRecord | null> {
+  await ensureGovernorSchema();
+  const row = await sqlGet<RegistryRow>('SELECT * FROM a423_agent_registry WHERE agent_id = ?', [agentId]);
   return row ? rowToRecord(row) : null;
 }
 
-export function listRegistry(): AgentPublicRecord[] {
-  ensureGovernorSchema();
-  const rows = getSqlite().prepare('SELECT * FROM a423_agent_registry ORDER BY created_at ASC').all() as RegistryRow[];
+export async function listRegistry(): Promise<AgentPublicRecord[]> {
+  await ensureGovernorSchema();
+  const rows = await sqlAll<RegistryRow>('SELECT * FROM a423_agent_registry ORDER BY created_at ASC');
   return rows.map(rowToRecord);
 }
 
@@ -238,23 +244,24 @@ export function challengeMessage(identityAgentId: string, challengeId: string, c
   return `a423.verify.v1\n${identityAgentId}\n${challengeId}\n${code}`;
 }
 
-export function createChallenge(appAgentId: string): {
+export async function createChallenge(appAgentId: string): Promise<{
   challenge_id: string;
   agent_id: string;
   app_agent_id: string;
   code: string;
   message: string;
   expires_at: string;
-} {
-  const record = getRegistryByAppId(appAgentId);
+}> {
+  const record = await getRegistryByAppId(appAgentId);
   if (!record) throw new GovernorError('AGENT_NOT_REGISTERED', 'Agent is not registered with the governor', 404);
   const challengeId = `chl-${randomUUID()}`;
   const code = b64url(randomBytes(32));
   const ttl = Number(process.env.A423_CHALLENGE_TTL_MS ?? 5 * 60 * 1000);
   const expiresAt = Date.now() + (Number.isFinite(ttl) && ttl > 0 ? ttl : 300_000);
-  getSqlite().prepare(
+  await sqlRun(
     'INSERT INTO a423_verification_challenges (challenge_id, app_agent_id, code_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)',
-  ).run(challengeId, appAgentId, hashCode(code).toString('hex'), expiresAt, Date.now());
+    [challengeId, appAgentId, hashCode(code).toString('hex'), expiresAt, Date.now()],
+  );
   return {
     challenge_id: challengeId,
     agent_id: record.agent_id,
@@ -286,17 +293,18 @@ export function verifyCredential(token: string, publicKeyPem?: string): Credenti
   }
 }
 
-export function verifyChallenge(args: {
+export async function verifyChallenge(args: {
   appAgentId: string;
   challengeId: string;
   code: string;
   signature: string;
-}): { status: 'verified'; agent: AgentPublicRecord; credential: string; credential_payload: CredentialPayload } {
-  const record = getRegistryByAppId(args.appAgentId);
+}): Promise<{ status: 'verified'; agent: AgentPublicRecord; credential: string; credential_payload: CredentialPayload }> {
+  const record = await getRegistryByAppId(args.appAgentId);
   if (!record) throw new GovernorError('AGENT_NOT_REGISTERED', 'Agent is not registered with the governor', 404);
-  const row = getSqlite().prepare(
+  const row = await sqlGet<{ challenge_id: string; code_hash: string; expires_at: number; used_at: number | null }>(
     'SELECT * FROM a423_verification_challenges WHERE challenge_id = ? AND app_agent_id = ?',
-  ).get(args.challengeId, args.appAgentId) as { challenge_id: string; code_hash: string; expires_at: number; used_at: number | null } | undefined;
+    [args.challengeId, args.appAgentId],
+  );
   if (!row) throw new GovernorError('CHALLENGE_NOT_FOUND', 'Challenge not found', 404);
   if (row.used_at) throw new GovernorError('CHALLENGE_USED', 'Challenge already used', 409);
   if (Date.now() > row.expires_at) throw new GovernorError('CHALLENGE_EXPIRED', 'Challenge expired', 410);
@@ -330,38 +338,42 @@ export function verifyChallenge(args: {
     jti: `cred-${randomUUID()}`,
   };
   const credential = signCredential(payload);
-  const sqlite = getSqlite();
-  sqlite.prepare('UPDATE a423_verification_challenges SET used_at = ? WHERE challenge_id = ?').run(now, args.challengeId);
-  sqlite.prepare(
-    `INSERT INTO a423_verifications (app_agent_id, agent_id, org_id, credential, issued_at, expires_at, governor_key_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(app_agent_id) DO UPDATE SET
-       agent_id = excluded.agent_id, org_id = excluded.org_id, credential = excluded.credential,
-       issued_at = excluded.issued_at, expires_at = excluded.expires_at, governor_key_id = excluded.governor_key_id`,
-  ).run(record.app_agent_id, record.agent_id, record.org_id, credential, now, expiresAt, config.governor.key_id);
-  sqlite.prepare('UPDATE a423_agent_registry SET status = \'verified\', verified_at = ? WHERE app_agent_id = ?').run(now, record.app_agent_id);
-  const verified = getRegistryByAppId(record.app_agent_id)!;
+  await sqlTransaction(async (tx) => {
+    await tx.run('UPDATE a423_verification_challenges SET used_at = ? WHERE challenge_id = ?', [now, args.challengeId]);
+    await tx.run(
+      `INSERT INTO a423_verifications (app_agent_id, agent_id, org_id, credential, issued_at, expires_at, governor_key_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(app_agent_id) DO UPDATE SET
+         agent_id = excluded.agent_id, org_id = excluded.org_id, credential = excluded.credential,
+         issued_at = excluded.issued_at, expires_at = excluded.expires_at, governor_key_id = excluded.governor_key_id`,
+      [record.app_agent_id, record.agent_id, record.org_id, credential, now, expiresAt, config.governor.key_id],
+    );
+    await tx.run('UPDATE a423_agent_registry SET status = \'verified\', verified_at = ? WHERE app_agent_id = ?', [now, record.app_agent_id]);
+  });
+  const verified = await getRegistryByAppId(record.app_agent_id);
+  if (!verified) throw new GovernorError('AGENT_NOT_REGISTERED', 'Agent disappeared during verification', 404);
   return { status: 'verified', agent: verified, credential, credential_payload: payload };
 }
 
-export function getVerification(appAgentId: string): { credential: string; expires_at: number } | null {
-  ensureGovernorSchema();
-  const row = getSqlite().prepare(
+export async function getVerification(appAgentId: string): Promise<{ credential: string; expires_at: number } | null> {
+  await ensureGovernorSchema();
+  const row = await sqlGet<{ credential: string; expires_at: number }>(
     'SELECT credential, expires_at FROM a423_verifications WHERE app_agent_id = ?',
-  ).get(appAgentId) as { credential: string; expires_at: number } | undefined;
+    [appAgentId],
+  );
   return row ?? null;
 }
 
-export function governorStatus(appAgentId: string): {
+export async function governorStatus(appAgentId: string): Promise<{
   verified: boolean;
   agent: AgentPublicRecord | null;
   expires_at: string | null;
   governor_key_id: string | null;
   reason?: string;
-} {
-  const agent = getRegistryByAppId(appAgentId);
+}> {
+  const agent = await getRegistryByAppId(appAgentId);
   if (!agent) return { verified: false, agent: null, expires_at: null, governor_key_id: null, reason: 'not_registered' };
-  const verification = getVerification(appAgentId);
+  const verification = await getVerification(appAgentId);
   if (!verification) return { verified: false, agent, expires_at: null, governor_key_id: null, reason: 'not_verified' };
   const config = loadGovernorConfig();
   const payload = verifyCredential(verification.credential, config.governor.public_key);
@@ -374,9 +386,9 @@ export function governorStatus(appAgentId: string): {
   return { verified: true, agent, expires_at: new Date(payload.exp).toISOString(), governor_key_id: config.governor.key_id };
 }
 
-export function isAgentVerified(appAgentId: string): boolean {
+export async function isAgentVerified(appAgentId: string): Promise<boolean> {
   try {
-    return governorStatus(appAgentId).verified;
+    return (await governorStatus(appAgentId)).verified;
   } catch {
     return false;
   }

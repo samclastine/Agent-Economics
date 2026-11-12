@@ -1,14 +1,15 @@
 import 'dotenv/config';
-import Database from 'better-sqlite3';
-import { readFileSync, mkdirSync } from 'fs';
-import { dirname, join } from 'path';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { sqlExec } from '../lib/db/sql';
 
-/** Apply scripts/schema.sql to the configured SQLite database. Idempotent. */
-const path = (process.env.DATABASE_URL ?? 'file:./data/agent-treasury.db').replace(/^file:/, '');
-if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
-const db = new Database(path);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-db.exec(readFileSync(join(__dirname, 'schema.sql'), 'utf8'));
-db.close();
-console.log(`sqlite schema applied at ${path}`);
+/** Apply scripts/schema.sql through the configured libSQL client (local or Turso). */
+async function main() {
+  await sqlExec(readFileSync(join(__dirname, 'schema.sql'), 'utf8'));
+  console.log('libSQL schema applied');
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+});

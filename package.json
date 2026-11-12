@@ -13,7 +13,9 @@
     "a423:verify": "tsx scripts/a423-verify-agents.ts",
     "a423:deploy-escrow": "tsx scripts/deploy-a423-escrow.ts",
     "a423:worker04": "tsx scripts/a423-worker04.ts",
-    "a423:authority": "tsx scripts/a423-authority-enroll.ts"
+    "a423:authority": "tsx scripts/a423-authority-enroll.ts",
+    "db:init": "tsx scripts/init-db.ts",
+    "turso:migrate": "tsx scripts/migrate-to-turso.ts"
   },
   "dependencies": {
     "@allorc/a423-sdk": "0.9.0",
@@ -23,7 +25,7 @@
     "@langchain/langgraph-checkpoint": "^1.2.2",
     "@langchain/langgraph-sdk": "^1.13.0",
     "@langchain/openai": "^1.8.0",
-    "better-sqlite3": "^12.2.0",
+    "@libsql/client": "^0.18.0",
     "decimal.js": "^10.6.0",
     "deepagents": "^1.16.2",
     "drizzle-orm": "^0.45.4",
@@ -40,9 +42,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
     "@tailwindcss/turbopack": "^4",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

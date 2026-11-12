@@ -83,10 +83,18 @@ The important settings are in `.env.example`:
 agent’s configured signer. It is a testnet demo convenience, not a production
 custody model.
 
+## Vercel + Turso
+
+See [`docs/VERCEL.md`](docs/VERCEL.md) for the production environment,
+Turso migration, cron worker and current constraints.
+
 ## Limits
 
 - Robinhood Chain **testnet only**; the token is a mock `tWIF`.
 - The A423 escrow deployment has **not** been source-verified and is not audited.
+- The public Robinhood RPC does not serve historical `eth_call` state, so production
+  receipts/worker evidence use `A423_EVIDENCE_REVALIDATION=off` (stored evidence,
+  no historical revalidation). Use an archive RPC to enable full revalidation.
 - Agent signing keys are server-side in this demo. Do not reuse this custody
   model for real funds.
 - Mandates are off-chain policy; they cannot reverse a broadcast transaction.

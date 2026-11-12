@@ -60,7 +60,7 @@ export type BootstrapResult = {
  * registered agent. Idempotent; never returns private material.
  */
 export async function bootstrapDevIdentities(): Promise<BootstrapResult> {
-  ensureGovernorSchema();
+  await ensureGovernorSchema();
   const db = getDb();
   const rows = await db.select().from(agents).orderBy(agents.createdAt);
   const targets = rows.filter((a) => a.name === 'Agent A' || a.name === 'Agent B');
@@ -80,7 +80,7 @@ export async function bootstrapDevIdentities(): Promise<BootstrapResult> {
   };
 
   for (const agent of targets) {
-    if (getRegistryByAppId(agent.id)) continue;
+    if (await getRegistryByAppId(agent.id)) continue;
     const orgId = `a423:org:v1:${b64url(randomBytes(16))}`;
     const orgKeys = keypair();
     const agentKeys = keypair();
@@ -93,7 +93,7 @@ export async function bootstrapDevIdentities(): Promise<BootstrapResult> {
     });
     privateFile.organizations[orgId] = orgKeys;
     privateFile.agents[agent.id] = agentKeys;
-    registerAgentRecord({
+    await registerAgentRecord({
       agent_id: identity.agent_id,
       app_agent_id: agent.id,
       org_id: orgId,
@@ -108,8 +108,8 @@ export async function bootstrapDevIdentities(): Promise<BootstrapResult> {
   }
 
   const arbiter = arbiterId();
-  if (!getRegistryByAppId(arbiter)) {
-    const primary = getRegistryByAppId(targets[0].id);
+  if (!await getRegistryByAppId(arbiter)) {
+    const primary = await getRegistryByAppId(targets[0].id);
     if (!primary) throw new Error('primary agent registry missing');
     const arbiterKeys = keypair();
     const identity: Identity = createIdentity({
@@ -120,7 +120,7 @@ export async function bootstrapDevIdentities(): Promise<BootstrapResult> {
       agent_email: 'arbiter@agents.a423.local',
     });
     privateFile.agents[arbiter] = arbiterKeys;
-    registerAgentRecord({
+    await registerAgentRecord({
       agent_id: identity.agent_id,
       app_agent_id: arbiter,
       org_id: primary.org_id,
@@ -134,7 +134,7 @@ export async function bootstrapDevIdentities(): Promise<BootstrapResult> {
     });
   }
 
-  const records = listRegistry();
+  const records = await listRegistry();
   const config: GovernorConfig = {
     version: 'a423.orgs.v1',
     generated_at: new Date().toISOString(),
@@ -166,13 +166,13 @@ export async function bootstrapDevIdentities(): Promise<BootstrapResult> {
   chmodSync(privatePath, 0o600);
 
   for (const record of records) {
-    const current = governorStatus(record.app_agent_id);
+    const current = await governorStatus(record.app_agent_id);
     if (current.verified) continue;
     const agentKey = privateFile.agents[record.app_agent_id]?.private_key;
     if (!agentKey) throw new Error(`missing local private key for ${record.app_agent_id}`);
-    const challenge = createChallenge(record.app_agent_id);
+    const challenge = await createChallenge(record.app_agent_id);
     const signature = b64url(sign(null, Buffer.from(challenge.message, 'utf8'), createPrivateKey(agentKey)));
-    verifyChallenge({
+    await verifyChallenge({
       appAgentId: record.app_agent_id,
       challengeId: challenge.challenge_id,
       code: challenge.code,
@@ -181,22 +181,24 @@ export async function bootstrapDevIdentities(): Promise<BootstrapResult> {
   }
 
   const targetIds = new Set(targets.map((a) => a.id));
-  const agentsOut: BootstrapAgent[] = listRegistry()
-    .filter((record) => targetIds.has(record.app_agent_id))
-    .map((record: AgentPublicRecord) => {
-    const status = governorStatus(record.app_agent_id);
-    return {
-      app_agent_id: record.app_agent_id,
-      agent_id: record.agent_id,
-      agent_name: record.agent_name,
-      org_id: record.org_id,
-      org_public_key: record.org_public_key,
-      agent_public_key: record.agent_public_key,
-      status: status.verified ? 'verified' : 'pending',
-      verified: status.verified,
-      expires_at: status.expires_at,
-    };
-  });
+  const agentsOut: BootstrapAgent[] = await Promise.all(
+    (await listRegistry())
+      .filter((record) => targetIds.has(record.app_agent_id))
+      .map(async (record: AgentPublicRecord) => {
+        const status = await governorStatus(record.app_agent_id);
+        return {
+          app_agent_id: record.app_agent_id,
+          agent_id: record.agent_id,
+          agent_name: record.agent_name,
+          org_id: record.org_id,
+          org_public_key: record.org_public_key,
+          agent_public_key: record.agent_public_key,
+          status: status.verified ? 'verified' : 'pending',
+          verified: status.verified,
+          expires_at: status.expires_at,
+        };
+      }),
+  );
 
   return { governor: config.governor, organizations: config.organizations, agents: agentsOut };
 }

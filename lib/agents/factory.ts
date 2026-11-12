@@ -26,6 +26,7 @@ WORKFLOW:
 1. Identify the worker with list_agents. Do not invent an agent ID.
 2. Create the offer: a423_job_action with action="send_job_offer" and input { worker_id, description, usdCents, taskType, artifactPath }.
    - The result's id is the exact workflow ID. Always keep and report that id. It is not the task.id.
+   - artifactPath must be a safe deliverable path such as '/report.md' or '/artifacts/research-report.md'; never use '/tmp' or arbitrary directories.
    - The worker automatically receives marketplace mail.
 3. Negotiate. The worker responds with respond_to_offer. You can accept_job_offer, counter_offer, decline_job_offer.
    - Never exceed the original budget (metadata.budget_usd_cents). If the worker asks above budget, decline or cancel instead of escalating.

@@ -40,7 +40,7 @@ function readJson<T>(path: string): T | null {
 }
 
 async function main() {
-  ensureGovernorSchema();
+  await ensureGovernorSchema();
   const db = getDb();
   const agentRows = await db.select().from(agents).orderBy(agents.createdAt);
   const targets = agentRows.filter((a) => a.name === 'Agent A' || a.name === 'Agent B');
@@ -69,7 +69,7 @@ async function main() {
   };
 
   for (const agent of targets) {
-    const existing = getRegistryByAppId(agent.id);
+    const existing = await getRegistryByAppId(agent.id);
     if (existing) {
       config.organizations.push({
         org_id: existing.org_id,
@@ -105,7 +105,7 @@ async function main() {
     const identity: Identity = createIdentity(ingredients);
     privateFile.organizations[orgId] = orgKeys;
     privateFile.agents[agent.id] = agentKeys;
-    registerAgentRecord({
+    await registerAgentRecord({
       agent_id: identity.agent_id,
       app_agent_id: agent.id,
       org_id: orgId,

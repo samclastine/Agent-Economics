@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import { JsonRpcProvider, Wallet, getAddress } from 'ethers';
-import { createSqliteStorage } from '@allorc/a423-sdk/storage';
+import { createA423Storage } from './storage';
 import { createAuthority, createCredentialAuthenticator } from '@allorc/a423-sdk/authority';
 import { createEscrowApplication } from '@allorc/a423-sdk/operations';
 import { createHash } from 'crypto';
@@ -13,7 +13,7 @@ import { usdCentsToTokenRaw } from '@/lib/finance/money';
 import { computeWorkMeter, defaultWorkMeterConfig, type WorkMeter } from './work-meter-core';
 import { validateArtifact as validateArtifactSpec } from '@/lib/artifacts/validators';
 import { generateJobFiles, scriptedContent } from '@/lib/a423/artifact-templates';
-import { getLatestWorkflowArtifact, storeWorkflowArtifact } from './operations';
+import { ensureIntegrationSchema, getLatestWorkflowArtifact, storeWorkflowArtifact } from './operations';
 
 export type A423Bridge = Awaited<ReturnType<typeof buildBridge>>;
 const globalForBridge = globalThis as unknown as { __a423Bridge04?: Promise<A423Bridge> };
@@ -47,12 +47,21 @@ function mandateWeeks(name: string, fallback: number): number {
   return value;
 }
 
+function agentPrivateKeys(): { agents: Record<string, { private_key: string }> } {
+  if (process.env.A423_PRIVATE_KEYS_JSON) return JSON.parse(process.env.A423_PRIVATE_KEYS_JSON) as { agents: Record<string, { private_key: string }> };
+  return JSON.parse(readFileSync(process.env.A423_PRIVATE_KEYS ?? '.a423/a423-private-keys.json', 'utf8')) as { agents: Record<string, { private_key: string }> };
+}
+
+function arbiterPrivateKey(): string {
+  if (process.env.A423_ARBITER_PRIVATE_KEY) return process.env.A423_ARBITER_PRIVATE_KEY;
+  const keyFile = required('A423_ARBITER_WALLET_KEY_PATH');
+  return (JSON.parse(readFileSync(keyFile, 'utf8')) as { private_key: string }).private_key;
+}
+
 async function walletFor(actor: string, provider: JsonRpcProvider): Promise<{ wallet: Wallet; address: string }> {
   const arbiter = process.env.A423_ARBITER_ID ?? 'a423-arbiter';
   if (actor === arbiter) {
-    const keyFile = required('A423_ARBITER_WALLET_KEY_PATH');
-    const privateKey = (JSON.parse(readFileSync(keyFile, 'utf8')) as { private_key: string }).private_key;
-    const wallet = new Wallet(privateKey, provider);
+    const wallet = new Wallet(arbiterPrivateKey(), provider);
     return { wallet, address: getAddress(wallet.address) };
   }
   const db = getDb();
@@ -76,11 +85,12 @@ async function buildBridge() {
   if (!Number.isSafeInteger(confirmations) || confirmations < 1) throw new Error('A423_CONFIRMATIONS invalid');
   const provider = new JsonRpcProvider(rpc, chainId, { staticNetwork: true });
 
-  const storage = createSqliteStorage({ filename: process.env.A423_STORAGE_FILE ?? 'data/a423-operations.sqlite' });
+  const storage = createA423Storage();
+  await ensureIntegrationSchema();
   const authority = createAuthority({
     issuer: process.env.A423_AUTHORITY_ISSUER ?? 'a423-local-authority',
     audience: process.env.A423_AUTHORITY_AUDIENCE ?? 'a423-local-app',
-    privateKey: readFileSync(required('A423_AUTHORITY_KEY_PATH'), 'utf8'),
+    privateKey: process.env.A423_AUTHORITY_KEY_PEM?.replace(/\\n/g, '\n') ?? readFileSync(required('A423_AUTHORITY_KEY_PATH'), 'utf8'),
     kv: storage.kv,
     credentialTtlSeconds: Number(process.env.A423_CREDENTIAL_TTL_SECONDS ?? 3600),
   });
@@ -127,7 +137,7 @@ async function buildBridge() {
       const terms = job.agreement?.terms as unknown as Record<string, unknown>;
       const path = typeof terms.artifact_path === 'string' ? terms.artifact_path : null;
       if (!path) return false;
-      const artifact = getLatestWorkflowArtifact(job.id);
+      const artifact = await getLatestWorkflowArtifact(job.id);
       if (!artifact) return false;
       const actual = `0x${createHash('sha256').update(artifact.content).digest('hex')}`;
       if (actual.toLowerCase() !== resultHash.toLowerCase()) return false;
@@ -152,7 +162,7 @@ async function buildBridge() {
           throw new Error('work deadline passed; submission is no longer possible; the requester must refund');
         }
       }
-      const existing = getLatestWorkflowArtifact(job.id);
+      const existing = await getLatestWorkflowArtifact(job.id);
       if (existing) {
         return { result_hash: `0x${existing.sha256}`, artifact_id: existing.id, artifact_path: existing.path, execution_key: idempotencyKey };
       }
@@ -164,7 +174,7 @@ async function buildBridge() {
       const generated = generateJobFiles(type, description).find((f) => f.path === path)
         ?? { path, content: scriptedContent(path, description) };
       if (signal?.aborted) throw new Error('execution aborted: workflow is paused for cancellation negotiation');
-      const artifact = storeWorkflowArtifact({
+      const artifact = await storeWorkflowArtifact({
         jobId: job.id,
         agentId: job.participants.worker,
         path: generated.path,
@@ -216,8 +226,7 @@ async function buildBridge() {
   async function credentialFor(actor: string): Promise<string> {
     const cached = credentials.get(actor);
     if (cached && cached.expires_at - Math.floor(Date.now() / 1000) > 60) return cached.credential;
-    const keyFile = JSON.parse(readFileSync('.a423/a423-private-keys.json', 'utf8')) as { agents: Record<string, { private_key: string }> };
-    const key = keyFile.agents[actor]?.private_key;
+    const key = agentPrivateKeys().agents[actor]?.private_key;
     if (!key) throw new Error(`no authority identity key for ${actor}`);
     const challenge = await authority.challenge(actor);
     const { sign, createPrivateKey } = await import('crypto');

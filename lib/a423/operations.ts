@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import type { AdapterResult, Json, Operation } from '@allorc/a423-sdk/workflow';
-import { getSqlite } from '@/lib/db/client';
+import { sqlExec, sqlGet, sqlRun, sqlTransaction } from '@/lib/db/sql';
 
 /**
  * Durable provider-operation ledger. `operation_id` is the SDK's stable id;
@@ -23,17 +23,6 @@ CREATE TABLE IF NOT EXISTS a423_operations (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS a423_operations_job_idx ON a423_operations(job_id, action);
-CREATE TABLE IF NOT EXISTS a423_runs (
-  run_key TEXT PRIMARY KEY,
-  job_id TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'queued',
-  attempts INTEGER NOT NULL DEFAULT 0,
-  error TEXT,
-  created_at INTEGER NOT NULL,
-  started_at INTEGER,
-  finished_at INTEGER
-);
-CREATE INDEX IF NOT EXISTS a423_runs_status_idx ON a423_runs(status);
 CREATE TABLE IF NOT EXISTS a423_artifacts (
   id TEXT PRIMARY KEY,
   job_id TEXT NOT NULL,
@@ -48,8 +37,8 @@ CREATE TABLE IF NOT EXISTS a423_artifacts (
 CREATE INDEX IF NOT EXISTS a423_artifacts_job_idx ON a423_artifacts(job_id);
 `;
 
-export function ensureIntegrationSchema(): void {
-  getSqlite().exec(SCHEMA);
+export async function ensureIntegrationSchema(): Promise<void> {
+  await sqlExec(SCHEMA);
 }
 
 export type OperationRow = {
@@ -84,10 +73,8 @@ function rowToOperation(row: Record<string, unknown>): OperationRow {
   };
 }
 
-export function getOperation(operationId: string): OperationRow | null {
-  const row = getSqlite().prepare('SELECT * FROM a423_operations WHERE operation_id = ?').get(operationId) as
-    | Record<string, unknown>
-    | undefined;
+export async function getOperation(operationId: string): Promise<OperationRow | null> {
+  const row = await sqlGet<Record<string, unknown>>('SELECT * FROM a423_operations WHERE operation_id = ?', [operationId]);
   return row ? rowToOperation(row) : null;
 }
 
@@ -96,50 +83,46 @@ export function getOperation(operationId: string): OperationRow | null {
  * lease can be re-claimed. A live lease returns `claimed: false` so callers
  * observe rather than resubmit. Adapters must still check the chain first.
  */
-export function claimOperation(
+export async function claimOperation(
   operation: Operation,
   jobId: string,
   leaseMs = 120_000,
   now = Date.now(),
   force = false,
-): { row: OperationRow; claimed: boolean } {
-  const sqlite = getSqlite();
+): Promise<{ row: OperationRow; claimed: boolean }> {
   const at = now;
-  const inserted = sqlite.prepare(
-    `INSERT OR IGNORE INTO a423_operations
-       (operation_id, job_id, action, actor, idempotency_key, status, provider_ref, evidence, attempts, lease_until, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'executing', '{}', NULL, 1, ?, ?, ?)`,
-  ).run(
-    operation.id,
-    jobId,
-    operation.action,
-    operation.actor,
-    operation.key,
-    at + leaseMs,
-    at,
-    at,
-  );
-  if (inserted.changes === 0) {
-    const updated = force
-      ? sqlite.prepare(
-          `UPDATE a423_operations
-              SET status = 'executing', lease_until = ?, attempts = attempts + 1, updated_at = ?
-            WHERE operation_id = ? AND status IN ('executing', 'pending')`,
-        ).run(at + leaseMs, at, operation.id)
-      : sqlite.prepare(
-          `UPDATE a423_operations
-              SET status = 'executing', lease_until = ?, attempts = attempts + 1, updated_at = ?
-            WHERE operation_id = ? AND status IN ('executing', 'pending')
-              AND (lease_until IS NULL OR lease_until < ?)`,
-        ).run(at + leaseMs, at, operation.id, at);
-    if (updated.changes === 1) {
-      return { row: getOperation(operation.id)!, claimed: true };
+  return sqlTransaction(async (tx) => {
+    const inserted = await tx.run(
+      `INSERT OR IGNORE INTO a423_operations
+         (operation_id, job_id, action, actor, idempotency_key, status, provider_ref, evidence, attempts, lease_until, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'executing', '{}', NULL, 1, ?, ?, ?)`,
+      [operation.id, jobId, operation.action, operation.actor, operation.key, at + leaseMs, at, at],
+    );
+    let claimed = inserted.changes === 1;
+    if (!claimed) {
+      const updated = force
+        ? await tx.run(
+            `UPDATE a423_operations
+                SET status = 'executing', lease_until = ?, attempts = attempts + 1, updated_at = ?
+              WHERE operation_id = ? AND status IN ('executing', 'pending')`,
+            [at + leaseMs, at, operation.id],
+          )
+        : await tx.run(
+            `UPDATE a423_operations
+                SET status = 'executing', lease_until = ?, attempts = attempts + 1, updated_at = ?
+              WHERE operation_id = ? AND status IN ('executing', 'pending')
+                AND (lease_until IS NULL OR lease_until < ?)`,
+            [at + leaseMs, at, operation.id, at],
+          );
+      claimed = updated.changes === 1;
     }
-  }
-  return { row: getOperation(operation.id)!, claimed: inserted.changes === 1 };
+    const row = await tx.get<Record<string, unknown>>('SELECT * FROM a423_operations WHERE operation_id = ?', [operation.id]);
+    if (!row) throw new Error(`operation ${operation.id} disappeared during claim`);
+    return { row: rowToOperation(row), claimed };
+  });
 }
 
-export function updateOperation(
+export async function updateOperation(
   operationId: string,
   patch: {
     status?: OperationRow['status'];
@@ -147,135 +130,49 @@ export function updateOperation(
     evidence?: AdapterResult;
     leaseUntil?: number | null;
   },
-): void {
-  const current = getOperation(operationId);
+): Promise<void> {
+  const current = await getOperation(operationId);
   if (!current) throw new Error(`unknown operation ${operationId}`);
-  getSqlite().prepare(
+  await sqlRun(
     `UPDATE a423_operations
         SET status = ?, provider_ref = ?, evidence = ?, lease_until = ?, updated_at = ?
       WHERE operation_id = ?`,
-  ).run(
-    patch.status ?? current.status,
-    JSON.stringify(patch.providerRef ?? current.provider_ref),
-    patch.evidence === undefined ? (current.evidence ? JSON.stringify(current.evidence) : null) : JSON.stringify(patch.evidence),
-    patch.leaseUntil === undefined ? current.lease_until : patch.leaseUntil,
-    Date.now(),
-    operationId,
+    [
+      patch.status ?? current.status,
+      JSON.stringify(patch.providerRef ?? current.provider_ref),
+      patch.evidence === undefined ? (current.evidence ? JSON.stringify(current.evidence) : null) : JSON.stringify(patch.evidence),
+      patch.leaseUntil === undefined ? current.lease_until : patch.leaseUntil,
+      Date.now(),
+      operationId,
+    ],
   );
 }
 
-export function mergeProviderRef(operationId: string, ref: Record<string, Json>): Record<string, Json> {
-  const current = getOperation(operationId);
+export async function mergeProviderRef(operationId: string, ref: Record<string, Json>): Promise<Record<string, Json>> {
+  const current = await getOperation(operationId);
   if (!current) throw new Error(`unknown operation ${operationId}`);
   const merged = { ...current.provider_ref, ...ref };
-  getSqlite().prepare('UPDATE a423_operations SET provider_ref = ?, updated_at = ? WHERE operation_id = ?')
-    .run(JSON.stringify(merged), Date.now(), operationId);
+  await sqlRun('UPDATE a423_operations SET provider_ref = ?, updated_at = ? WHERE operation_id = ?', [
+    JSON.stringify(merged),
+    Date.now(),
+    operationId,
+  ]);
   return merged;
 }
 
-export function finalizeOperation(
+export async function finalizeOperation(
   operationId: string,
   status: 'pending' | 'confirmed' | 'rejected',
   result: AdapterResult,
   retryAfterMs = 15_000,
-): void {
+): Promise<void> {
   const lease = status === 'pending' ? Date.now() + retryAfterMs : null;
-  getSqlite().prepare(
+  await sqlRun(
     `UPDATE a423_operations
         SET status = ?, evidence = ?, lease_until = ?, updated_at = ?
       WHERE operation_id = ?`,
-  ).run(status, JSON.stringify(result), lease, Date.now(), operationId);
-}
-
-// ---------------------------------------------------------------------------
-// Durable execution queue (the app executes work; the SDK never does)
-// ---------------------------------------------------------------------------
-
-export type RunRow = {
-  run_key: string;
-  job_id: string;
-  status: 'queued' | 'running' | 'done' | 'failed';
-  attempts: number;
-  error: string | null;
-  created_at: number;
-  started_at: number | null;
-  finished_at: number | null;
-};
-
-export function enqueueRun(runKey: string, jobId: string): { row: RunRow; created: boolean } {
-  const sqlite = getSqlite();
-  const now = Date.now();
-  const inserted = sqlite.prepare(
-    'INSERT OR IGNORE INTO a423_runs (run_key, job_id, status, attempts, created_at) VALUES (?, ?, \'queued\', 1, ?)',
-  ).run(runKey, jobId, now);
-  if (inserted.changes === 0) {
-    // A failed run may be retried by a new start action; dedupe the run key but
-    // reset the row. A queued/running/done run is reused unchanged.
-    sqlite.prepare(
-      `UPDATE a423_runs SET status = 'queued', error = NULL, finished_at = NULL,
-              attempts = attempts + 1, created_at = ?
-        WHERE run_key = ? AND status = 'failed'`,
-    ).run(now, runKey);
-  }
-  const row = sqlite.prepare('SELECT * FROM a423_runs WHERE run_key = ?').get(runKey) as Record<string, unknown>;
-  return {
-    row: {
-      run_key: String(row.run_key),
-      job_id: String(row.job_id),
-      status: row.status as RunRow['status'],
-      attempts: Number(row.attempts),
-      error: row.error == null ? null : String(row.error),
-      created_at: Number(row.created_at),
-      started_at: row.started_at == null ? null : Number(row.started_at),
-      finished_at: row.finished_at == null ? null : Number(row.finished_at),
-    },
-    created: inserted.changes === 1,
-  };
-}
-
-export function getRun(runKey: string): RunRow | null {
-  const row = getSqlite().prepare('SELECT * FROM a423_runs WHERE run_key = ?').get(runKey) as Record<string, unknown> | undefined;
-  if (!row) return null;
-  return {
-    run_key: String(row.run_key),
-    job_id: String(row.job_id),
-    status: row.status as RunRow['status'],
-    attempts: Number(row.attempts),
-    error: row.error == null ? null : String(row.error),
-    created_at: Number(row.created_at),
-    started_at: row.started_at == null ? null : Number(row.started_at),
-    finished_at: row.finished_at == null ? null : Number(row.finished_at),
-  };
-}
-
-export function claimQueuedRuns(limit = 10): RunRow[] {
-  const sqlite = getSqlite();
-  const rows = sqlite.prepare(
-    `SELECT * FROM a423_runs WHERE status = 'queued' ORDER BY created_at ASC LIMIT ?`,
-  ).all(limit) as Record<string, unknown>[];
-  const now = Date.now();
-  for (const row of rows) {
-    sqlite.prepare(
-      `UPDATE a423_runs SET status = 'running', started_at = ?, attempts = attempts + 1
-        WHERE run_key = ? AND status = 'queued'`,
-    ).run(now, row.run_key);
-  }
-  return rows.map((row) => ({
-    run_key: String(row.run_key),
-    job_id: String(row.job_id),
-    status: 'running' as const,
-    attempts: Number(row.attempts) + 1,
-    error: null,
-    created_at: Number(row.created_at),
-    started_at: now,
-    finished_at: null,
-  }));
-}
-
-export function finishRun(runKey: string, status: 'done' | 'failed', error?: string): void {
-  getSqlite().prepare(
-    'UPDATE a423_runs SET status = ?, error = ?, finished_at = ? WHERE run_key = ?',
-  ).run(status, error ?? null, Date.now(), runKey);
+    [status, JSON.stringify(result), lease, Date.now(), operationId],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -294,44 +191,53 @@ export type WorkflowArtifact = {
   created_at: number;
 };
 
-export function storeWorkflowArtifact(opts: {
-  jobId: string;
-  agentId: string;
-  path: string;
-  mime?: string;
-  content: Buffer;
-  manifest?: Record<string, Json>;
-}): WorkflowArtifact {
-  const id = `art-${randomUUID()}`;
-  const sha256 = createHash('sha256').update(opts.content).digest('hex');
-  const mime = opts.mime ?? 'text/markdown';
-  const manifest = opts.manifest ?? {};
-  getSqlite().prepare(
-    `INSERT INTO a423_artifacts (id, job_id, agent_id, path, mime, content, sha256, manifest_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, opts.jobId, opts.agentId, opts.path, mime, opts.content, sha256, JSON.stringify(manifest), Date.now());
-  return getWorkflowArtifact(id)!;
-}
-
-export function getLatestWorkflowArtifact(jobId: string): WorkflowArtifact | null {
-  const row = getSqlite().prepare(
-    'SELECT * FROM a423_artifacts WHERE job_id = ? ORDER BY created_at DESC LIMIT 1',
-  ).get(jobId) as Record<string, unknown> | undefined;
-  return row ? getWorkflowArtifact(String(row.id)) : null;
-}
-
-export function getWorkflowArtifact(id: string): WorkflowArtifact | null {
-  const row = getSqlite().prepare('SELECT * FROM a423_artifacts WHERE id = ?').get(id) as Record<string, unknown> | undefined;
-  if (!row) return null;
+function rowToArtifact(row: Record<string, unknown>): WorkflowArtifact {
   return {
     id: String(row.id),
     job_id: String(row.job_id),
     agent_id: String(row.agent_id),
     path: String(row.path),
     mime: String(row.mime),
-    content: Buffer.from(row.content as Buffer),
+    content: row.content instanceof ArrayBuffer
+      ? Buffer.from(row.content)
+      : Buffer.from(row.content as Uint8Array),
     sha256: String(row.sha256),
     manifest: JSON.parse(String(row.manifest_json ?? '{}')) as Record<string, Json>,
     created_at: Number(row.created_at),
   };
+}
+
+export async function storeWorkflowArtifact(opts: {
+  jobId: string;
+  agentId: string;
+  path: string;
+  mime?: string;
+  content: Buffer;
+  manifest?: Record<string, Json>;
+}): Promise<WorkflowArtifact> {
+  const id = `art-${randomUUID()}`;
+  const sha256 = createHash('sha256').update(opts.content).digest('hex');
+  const mime = opts.mime ?? 'text/markdown';
+  const manifest = opts.manifest ?? {};
+  await sqlRun(
+    `INSERT INTO a423_artifacts (id, job_id, agent_id, path, mime, content, sha256, manifest_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, opts.jobId, opts.agentId, opts.path, mime, opts.content, sha256, JSON.stringify(manifest), Date.now()],
+  );
+  const artifact = await getWorkflowArtifact(id);
+  if (!artifact) throw new Error('artifact insert did not persist');
+  return artifact;
+}
+
+export async function getLatestWorkflowArtifact(jobId: string): Promise<WorkflowArtifact | null> {
+  const row = await sqlGet<Record<string, unknown>>(
+    'SELECT * FROM a423_artifacts WHERE job_id = ? ORDER BY created_at DESC LIMIT 1',
+    [jobId],
+  );
+  return row ? rowToArtifact(row) : null;
+}
+
+export async function getWorkflowArtifact(id: string): Promise<WorkflowArtifact | null> {
+  const row = await sqlGet<Record<string, unknown>>('SELECT * FROM a423_artifacts WHERE id = ?', [id]);
+  return row ? rowToArtifact(row) : null;
 }

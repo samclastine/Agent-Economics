@@ -15,12 +15,14 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     const actor = process.env.A423_DASHBOARD_ACTOR
       || (await bridge.storage.jobs.list({ limit: 1 }))[0]?.participants.requester;
     if (!actor) return Response.json({ error: 'no dashboard actor' }, { status: 503 });
-    const receipt = await freshCancellationReceipt({
-      workflow: bridge.app.workflow,
-      id,
-      actor,
-      revalidate: bridge.app.applicationOptions.revalidate,
-    });
+    const receipt = process.env.A423_EVIDENCE_REVALIDATION === 'off'
+      ? await bridge.app.workflow.cancellationReceipt(id, actor)
+      : await freshCancellationReceipt({
+          workflow: bridge.app.workflow,
+          id,
+          actor,
+          revalidate: bridge.app.applicationOptions.revalidate,
+        });
     if (pdf) {
       const bytes = await renderReceiptPdf(receipt);
       return new Response(Buffer.from(bytes), { headers: { 'content-type': 'application/pdf', 'cache-control': 'no-store' } });

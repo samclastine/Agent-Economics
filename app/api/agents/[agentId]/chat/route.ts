@@ -61,7 +61,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ agentId: strin
   if (process.env.A423_REQUIRE_VERIFIED_AGENTS !== 'false') {
     let status;
     try {
-      status = governorStatus(agentId);
+      status = await governorStatus(agentId);
     } catch {
       return fail('identity governor is unavailable', 503);
     }

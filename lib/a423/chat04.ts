@@ -10,6 +10,7 @@ import { usdCentsToTokenRaw } from '@/lib/finance/money';
 import { isMalformedPendingSubmit, repairMalformedPendingSubmit } from './pending';
 import { freezeWorkMeter } from './work-meter';
 import { displayTokenSymbol } from '@/lib/token-symbol';
+import { isAllowedPath } from '@/lib/artifacts/validators';
 
 const TOOLS = new Set([
   'send_job_offer', 'propose_quote', 'accept_quote', 'fund_escrow', 'work_on_job',
@@ -806,9 +807,12 @@ export const A423_CHAT_ACTIONS = [
 
 async function walletOf(agentId: string): Promise<string> {
   if (agentId === (process.env.A423_ARBITER_ID ?? 'a423-arbiter')) {
-    const { readFileSync } = await import('fs');
     const { Wallet } = await import('ethers');
-    const key = (JSON.parse(readFileSync(process.env.A423_ARBITER_WALLET_KEY_PATH!, 'utf8')) as { private_key: string }).private_key;
+    let key = process.env.A423_ARBITER_PRIVATE_KEY;
+    if (!key) {
+      const { readFileSync } = await import('fs');
+      key = (JSON.parse(readFileSync(process.env.A423_ARBITER_WALLET_KEY_PATH!, 'utf8')) as { private_key: string }).private_key;
+    }
     return new Wallet(key).address;
   }
   const db = getDb();
@@ -845,7 +849,10 @@ async function termsForChat(
     taskId: `task-${randomUUID()}`,
     taskType: String(input.taskType ?? input.task_type ?? 'research'),
     description: String(input.description ?? 'A423 workflow task'),
-    artifactPath: String(input.artifactPath ?? input.artifact_path ?? '/report.md'),
+    artifactPath: (() => {
+      const requested = String(input.artifactPath ?? input.artifact_path ?? '/report.md');
+      return isAllowedPath(requested) ? requested : '/report.md';
+    })(),
     criteria: (input.criteria as Record<string, never>) ?? { minWords: 5, minChars: 20 },
     amountRaw,
     amountDecimals: 18,

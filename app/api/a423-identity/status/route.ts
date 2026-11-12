@@ -11,10 +11,10 @@ export async function GET(): Promise<Response> {
     const db = getDb();
     const rows = await db.select().from(agents);
     const targets = rows.filter((a) => a.name === 'Agent A' || a.name === 'Agent B');
-    const registry = listRegistry();
-    const agentsOut = targets.map((a) => {
+    const registry = await listRegistry();
+    const agentsOut = await Promise.all(targets.map(async (a) => {
       const record = registry.find((r) => r.app_agent_id === a.id);
-      const status = record ? governorStatus(a.id) : null;
+      const status = record ? await governorStatus(a.id) : null;
       return {
         app_agent_id: a.id,
         agent_id: record?.agent_id ?? null,
@@ -26,7 +26,7 @@ export async function GET(): Promise<Response> {
         verified: status?.verified ?? false,
         expires_at: status?.expires_at ?? null,
       };
-    });
+    }));
     return Response.json({ ok: agentsOut.length >= 2 && agentsOut.every((a) => a.verified), agents: agentsOut }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error('[a423-identity] status failed:', error instanceof Error ? error.message : String(error));

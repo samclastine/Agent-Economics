@@ -1,61 +1,68 @@
-import { subscribeEvents } from '@/lib/events';
 import { getDb } from '@/lib/db/client';
 import { agentEvents } from '@/lib/db/schema';
-import { desc } from 'drizzle-orm';
+import { asc, desc, gt } from 'drizzle-orm';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
-/** How many persisted events a fresh client replays to rebuild recent UI state. */
 const REPLAY_LIMIT = 200;
+const POLL_MS = 1500;
 
-// Cloudflare Quick Tunnels buffer SSE GET responses until the connection
-// closes, but stream POST responses normally. Both verbs serve the same feed.
-export async function POST(req: Request) {
-  return GET(req);
-}
-
-export async function GET(req: Request) {
+/**
+ * Vercel-compatible event feed. Instead of an in-process subscriber bus, the
+ * stream polls the durable event table; this works across serverless instances.
+ * The dashboard reconnects automatically when the function reaches maxDuration.
+ */
+async function handle(req: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      let lastId = 0;
+      let closed = false;
       const send = (data: unknown) => {
-        try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch { /* closed */ }
+        if (closed) return;
+        try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch { closed = true; }
       };
-      // Subscribe before the replay query so no live event can fall into the
-      // gap. Live events are buffered until the replay finishes, then flushed
-      // in id order (skipping anything the replay already delivered).
-      let replaying = true;
-      let maxReplayId = 0;
-      const buffered: { id: string; type: string; payload: unknown; agentId?: string; jobId?: string; runId?: string; createdAt: Date; ephemeral?: boolean }[] = [];
-      const unsub = subscribeEvents((evt) => {
-        if (replaying) { buffered.push(evt); return; }
-        send(evt);
-      });
+
+      const db = getDb();
       try {
-        const db = getDb();
-        // Latest events, not the oldest: a reopened dashboard wants the recent
-        // conversation, and the client marks these as `replay` so old chat
-        // mail isn't injected into whichever session happens to be open.
         const recent = await db.select().from(agentEvents).orderBy(desc(agentEvents.id)).limit(REPLAY_LIMIT);
-        for (const r of recent.reverse()) {
-          maxReplayId = r.id;
+        for (const row of recent.reverse()) {
+          lastId = Math.max(lastId, row.id);
           send({
-            id: r.id.toString(), type: r.type, payload: r.payloadJson,
-            agentId: r.agentId, jobId: r.jobId, runId: r.runId, createdAt: r.createdAt,
+            id: row.id.toString(), type: row.type, payload: row.payloadJson,
+            agentId: row.agentId, jobId: row.jobId, runId: row.runId, createdAt: row.createdAt,
             replay: true,
           });
         }
-      } catch { /* db may be unavailable */ }
-      replaying = false;
-      for (const evt of buffered) {
-        if (!evt.ephemeral && Number(evt.id) <= maxReplayId) continue; // already replayed
-        send(evt);
-      }
+      } catch { /* db may be temporarily unavailable */ }
+
+      const poll = setInterval(async () => {
+        if (closed) return;
+        try {
+          const rows = await db.select().from(agentEvents)
+            .where(gt(agentEvents.id, lastId))
+            .orderBy(asc(agentEvents.id))
+            .limit(200);
+          for (const row of rows) {
+            lastId = Math.max(lastId, row.id);
+            send({
+              id: row.id.toString(), type: row.type, payload: row.payloadJson,
+              agentId: row.agentId, jobId: row.jobId, runId: row.runId, createdAt: row.createdAt,
+            });
+          }
+        } catch { /* retry on next poll */ }
+      }, POLL_MS);
+
       const keepalive = setInterval(() => {
-        try { controller.enqueue(encoder.encode(`: ping\n\n`)); } catch { clearInterval(keepalive); }
+        if (closed) return;
+        try { controller.enqueue(encoder.encode(': ping\n\n')); } catch { closed = true; }
       }, 15000);
+
       req.signal.addEventListener('abort', () => {
-        unsub();
+        closed = true;
+        clearInterval(poll);
         clearInterval(keepalive);
         try { controller.close(); } catch { /* noop */ }
       });
@@ -64,4 +71,12 @@ export async function GET(req: Request) {
   return new Response(stream, {
     headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
   });
+}
+
+export async function POST(req: Request) {
+  return handle(req);
+}
+
+export async function GET(req: Request) {
+  return handle(req);
 }

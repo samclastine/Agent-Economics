@@ -647,6 +647,18 @@ export default function Dashboard() {
     setNewSessPending((p) => ({ ...p, [agentId]: false }));
   }, [sessionOf, sessKey]);
 
+  // Keep the A423 queue moving while the dashboard is open. Vercel Cron is a
+  // backup; this makes the app work on Hobby plans without another server.
+  useEffect(() => {
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void fetch('/api/a423/worker', { method: 'POST' }).catch(() => undefined);
+    };
+    const timer = setInterval(tick, 60_000);
+    const first = setTimeout(tick, 5_000);
+    return () => { clearInterval(timer); clearTimeout(first); };
+  }, []);
+
   useEffect(() => {
     void Promise.resolve().then(refresh);
     fetch('/api/config').then((r) => r.json()).then(setConfig).catch(() => undefined);

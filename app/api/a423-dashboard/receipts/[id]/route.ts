@@ -11,12 +11,19 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     const bridge = await getA423Bridge();
     const actor = process.env.A423_DASHBOARD_ACTOR || (await bridge.storage.jobs.list({ limit: 1 }))[0]?.participants.requester;
     if (!actor) return Response.json({ error: 'no dashboard actor' }, { status: 503 });
-    const receipt = await freshReceipts({
-      workflow: bridge.app.workflow,
-      id,
-      actor,
-      revalidate: bridge.app.applicationOptions.revalidate,
-    });
+    const receipt = process.env.A423_EVIDENCE_REVALIDATION === 'off'
+      ? {
+          ...(await bridge.app.workflow.receipts(id, actor)),
+          checks: [],
+          revalidated_at: null,
+          evidence_status: 'not_revalidated',
+        }
+      : await freshReceipts({
+          workflow: bridge.app.workflow,
+          id,
+          actor,
+          revalidate: bridge.app.applicationOptions.revalidate,
+        });
     if (new URL(request.url).searchParams.get('format') === 'pdf') {
       const bytes = await renderReceiptPdf(receipt);
       return new Response(Buffer.from(bytes), { headers: { 'content-type': 'application/pdf', 'cache-control': 'no-store' } });

@@ -5,12 +5,13 @@
 import 'dotenv/config';
 import { readFileSync } from 'fs';
 import { createPrivateKey, sign } from 'crypto';
-import { createSqliteStorage } from '@allorc/a423-sdk/storage';
+import { createA423Storage } from '../lib/a423/storage';
 import { createAuthority } from '@allorc/a423-sdk/authority';
-import { getDb, getSqlite } from '../lib/db/client';
+import { getDb } from '../lib/db/client';
+import { sqlGet } from '../lib/db/sql';
 import { agents } from '../lib/db/schema';
 
-const storage = createSqliteStorage({ filename: process.env.A423_STORAGE_FILE ?? 'data/a423-operations.sqlite' });
+const storage = createA423Storage();
 const authority = createAuthority({
   issuer: process.env.A423_AUTHORITY_ISSUER ?? 'a423-local-authority',
   audience: process.env.A423_AUTHORITY_AUDIENCE ?? 'a423-local-app',
@@ -32,8 +33,8 @@ async function main() {
   const agentB = rows.find((a) => a.name === 'Agent B');
   if (!agentA || !agentB) throw new Error('seed agents first');
   const arbiterId = process.env.A423_ARBITER_ID ?? 'a423-arbiter';
-  const aOrg = storageOrgFor(agentA.id);
-  const bOrg = storageOrgFor(agentB.id);
+  const aOrg = await storageOrgFor(agentA.id);
+  const bOrg = await storageOrgFor(agentB.id);
 
   for (const orgId of new Set([aOrg.org_id, bOrg.org_id])) {
     const org = keys.organizations[orgId];
@@ -52,8 +53,8 @@ async function main() {
   console.log('authority enrollment complete');
 }
 
-function storageOrgFor(appAgentId: string): { org_id: string } {
-  const raw = getSqlite().prepare('SELECT org_id FROM a423_agent_registry WHERE app_agent_id = ?').get(appAgentId) as { org_id: string } | undefined;
+async function storageOrgFor(appAgentId: string): Promise<{ org_id: string }> {
+  const raw = await sqlGet<{ org_id: string }>('SELECT org_id FROM a423_agent_registry WHERE app_agent_id = ?', [appAgentId]);
   if (!raw) throw new Error(`no registry org for ${appAgentId}`);
   return { org_id: raw.org_id };
 }
